@@ -1,0 +1,206 @@
+﻿@page "/category-chart"
+@using EBCaseStudy.Services.Models
+@inject EBCaseStudy.Services.IApiClient ApiClient
+@inject IJSRuntime JS
+@rendermode InteractiveServer
+
+<h3>Product price — 10 weeks</h3>
+
+<div class="search-row">
+    <input placeholder="Search product..." @bind="searchTerm" />
+    <button class="btn" @onclick="RefreshProductList">Refresh</button>
+    @if (selectedProductId != null)
+    {
+        <button class="btn" @onclick="ClearSelection">Clear</button>
+    }
+</div>
+
+@if (isLoading)
+{
+    <p>Loading…</p>
+}
+else if (loadError)
+{
+    <p class="text-danger">Failed to load data.</p>
+}
+else
+{
+    <div class="search-results">
+        @if (productMatches?.Any() == true && selectedProductId == null)
+        {
+            <ul class="match-list">
+                @foreach (var p in productMatches.Take(10))
+                {
+                    <li><button class="link" @onclick="() => SelectProduct(p.Id, p.Name)">@p.Name (@p.Sku)</button></li>
+                }
+            </ul>
+        }
+    </div>
+
+    @if (selectedProductId != null)
+    {
+        <div style="height:400px; margin-top:1rem">
+            <canvas id="productChartCanvas"></canvas>
+        </div>
+        <div style="margin-top:0.5rem">
+            <small>Showing average price per week for: <strong>@selectedProductName</strong></small>
+        </div>
+    }
+}
+
+@code {
+    private bool isLoading = true;
+    private bool loadError = false;
+
+    private string searchTerm = string.Empty;
+    private List<ProductDto> allProducts = new();
+    private IEnumerable<ProductDto> productMatches = Enumerable.Empty<ProductDto>();
+
+    private int? selectedProductId;
+    private string? selectedProductName;
+
+    // chart payload
+    private string[]? chartLabels;
+    private object[]? chartDatasets;
+    private bool chartDataReady;
+    private bool chartRendered;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAllProductsAsync();
+    }
+
+    private async Task LoadAllProductsAsync()
+    {
+        isLoading = true;
+        loadError = false;
+        try
+        {
+            var resp = await ApiClient.GetProductsAsync(pageNumber: 1, pageSize: 5000);
+            allProducts = resp?.Items ?? new List<ProductDto>();
+            UpdateMatches();
+        }
+        catch
+        {
+            loadError = true;
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void UpdateMatches()
+    {
+        if (string.IsNullOrWhiteSpace(searchTerm))
+        {
+            productMatches = Enumerable.Empty<ProductDto>();
+        }
+        else
+        {
+            var q = searchTerm.Trim();
+            productMatches = allProducts.Where(p =>
+                (p.Name ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                (p.Sku ?? string.Empty).Contains(q, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private async Task RefreshProductList()
+    {
+        await LoadAllProductsAsync();
+    }
+
+    private void ClearSelection()
+    {
+        selectedProductId = null;
+        selectedProductName = null;
+        chartDataReady = false;
+        chartRendered = false;
+        StateHasChanged();
+    }
+
+    private async Task SelectProduct(int productId, string productName)
+    {
+        selectedProductId = productId;
+        selectedProductName = productName;
+        productMatches = Enumerable.Empty<ProductDto>();
+        searchTerm = string.Empty;
+        await LoadChartForSelectedProductAsync();
+    }
+
+    private async Task LoadChartForSelectedProductAsync()
+    {
+        if (selectedProductId == null) return;
+        isLoading = true;
+        loadError = false;
+        chartDataReady = false;
+        chartRendered = false;
+
+        try
+        {
+            // compute 10 week windows (oldest first)
+            var date = new DateTime(2025, 4, 15);
+            int daysFromMonday = ((int)date.DayOfWeek + 6) % 7;
+            var latestWeekStart = date.AddDays(-daysFromMonday);
+            var weekStarts = Enumerable.Range(0, 10)
+                .Select(i => latestWeekStart.AddDays(-7 * (9 - i)))
+                .ToArray();
+
+            var earliestStart = weekStarts.First();
+            var latestEndExclusive = weekStarts.Last().AddDays(7);
+
+            // fetch prices for the product in range
+            var priceResp = await ApiClient.GetPricesAsync(pageNumber: 1, pageSize: 5000,
+                productId: selectedProductId, startDate: earliestStart, endDate: latestEndExclusive, sortBy: "DateTime", sortDirection: "desc");
+            var prices = priceResp?.Items ?? new List<PriceDto>();
+
+            // build labels and data
+            chartLabels = weekStarts.Select(w => w.ToString("MM/dd")).ToArray();
+
+            var dataPerWeek = new double?[10];
+            for (int wi = 0; wi < weekStarts.Length; wi++)
+            {
+                var wStart = weekStarts[wi];
+                var wEnd = wStart.AddDays(7);
+                var weekPrices = prices
+                    .Where(pr => pr.DateTime >= wStart && pr.DateTime < wEnd)
+                    .Select(pr => pr.Amount)
+                    .ToList();
+
+                if (weekPrices.Count == 0) dataPerWeek[wi] = null;
+                else dataPerWeek[wi] = Math.Round(weekPrices.Average(), 2);
+            }
+
+            chartDatasets = new object[]
+            {
+                new {
+                    label = selectedProductName ?? "Product",
+                    data = dataPerWeek.Select(d => d.HasValue ? d.Value : (double?)null).ToArray(),
+                    backgroundColor = "#4e79a7"
+                }
+            };
+
+            chartDataReady = true;
+            chartRendered = false;
+        }
+        catch
+        {
+            loadError = true;
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (chartDataReady && !chartRendered && chartLabels != null && chartDatasets != null && selectedProductId != null)
+        {
+            await JS.InvokeVoidAsync("createCategoryChart", "productChartCanvas", chartLabels, chartDatasets);
+            chartRendered = true;
+        }
+    }
+}

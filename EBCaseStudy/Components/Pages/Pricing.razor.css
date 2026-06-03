@@ -1,0 +1,110 @@
+﻿/* Scoped CSS for Pricing.razor - mobile friendly */
+.pricing-page {
+	padding: 1rem;
+	max-width: 1100px;
+	margin: 0 auto;
+}
+
+.pricing-header {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	margin-bottom: 0.5rem;
+}
+
+.action-row {
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
+}
+
+.search {
+	flex: 1;
+	padding: 0.6rem;
+	font-size: 1rem;
+	border-radius: 8px;
+	border: 1px solid #ccc;
+}
+
+.btn {
+	padding: 0.6rem 0.9rem;
+	font-size: 1rem;
+	border-radius: 8px;
+	border: none;
+	cursor: pointer;
+}
+
+	.btn.primary {
+		background-color: #0d6efd;
+		color: white;
+	}
+
+/* Grid of cards */
+.pricing-grid {
+	display: grid;
+	gap: 0.6rem;
+	grid-template-columns: 1fr;
+}
+
+/* Switch to two columns on wider screens */
+@media (min-width: 640px) {
+	.pricing-grid {
+		grid-template-columns: repeat(2, 1fr);
+	}
+}
+
+@media (min-width: 992px) {
+	.pricing-grid {
+		grid-template-columns: repeat(3, 1fr);
+	}
+}
+
+/* Card styles for touch targets */
+.pricing-card {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	padding: 0.8rem;
+	border-radius: 12px;
+	background: #fff;
+	box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+	min-height: 64px;
+	transition: transform 0.08s ease;
+}
+
+	.pricing-card:active {
+		transform: scale(0.997);
+	}
+
+.card-left input[type="checkbox"] {
+	width: 1.4rem;
+	height: 1.4rem;
+}
+
+/* Body */
+.card-body .title {
+	font-weight: 600;
+	font-size: 1rem;
+}
+
+.card-body .meta {
+	font-size: 0.85rem;
+	color: #666;
+}
+
+/* Right status */
+.card-right .status {
+	font-size: 0.85rem;
+	padding: 0.25rem 0.5rem;
+	border-radius: 6px;
+	background: #f1f3f5;
+	white-space: nowrap;
+}
+
+/* Price history */
+.price-history {
+	padding: 0.6rem 1rem;
+	background: #fafafa;
+	border-radius: 10px;
+	margin-bottom: 0.4rem;
+}

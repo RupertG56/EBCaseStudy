@@ -1,0 +1,191 @@
+﻿@rendermode InteractiveServer
+@page "/pricing"
+@using EBCaseStudy.Services.Models
+@inject EBCaseStudy.Services.IApiClient ApiClient
+
+<div class="pricing-page">
+    <header class="pricing-header">
+        <h3>Products & Prices</h3>
+        <div class="action-row">
+            <input class="search" placeholder="Search products..." @bind="searchTerm" @bind:event="oninput" />
+            <button class="btn primary" @onclick="() => LoadAsync(1)">Refresh</button>
+        </div>
+    </header>
+
+    @if (isLoading)
+    {
+        <p>Loading…</p>
+    }
+    else if (loadError)
+    {
+        <p class="text-danger">Failed to load data.</p>
+    }
+    else
+    {
+        <div class="pricing-grid" role="list">
+            @foreach (var p in products)
+            {
+                <article class="pricing-card" role="listitem">
+                    <div class="card-body" style="flex:1">
+                        <div class="title">@p.Name</div>
+                        <div class="meta">@p.Category @if(!string.IsNullOrEmpty(p.Sku)){
+                            <span> • SKU: @p.Sku</span>
+                        }
+                    </div>
+                    <div class="meta">Latest: @((LatestPriceFor(p.Id) is PriceDto lp) ? lp.Amount.ToString("C") : "—")</div>
+                </div>
+                <div class="card-right">
+                    <button class="btn" @onclick="() => ToggleHistoryAsync(p.Id)">@((expandedProductId == p.Id) ? "Hide" : "History")</button>
+                </div>
+            </article>
+
+            @if (expandedProductId == p.Id)
+            {
+                <div class="price-history">
+                    @if (priceHistoryLoading)
+                    {
+                        <p>Loading history…</p>
+                    }
+                    else if (priceHistoryError)
+                    {
+                        <p class="text-danger">Failed to load price history.</p>
+                    }
+                    else if (priceHistory.TryGetValue(p.Id, out var list) && list.Count > 0)
+                    {
+                        <ul>
+                            @foreach (var pr in list)
+                            {
+                                <li>@pr.DateTime.ToString("g") — @pr.Amount.ToString("C") (@pr.Quantity @pr.UnitOfMeasure)</li>
+                            }
+                        </ul>
+                    }
+                    else
+                    {
+                        <p>No history found.</p>
+                    }
+                </div>
+            }
+        }
+    </div>
+
+    <!-- Paging control -->
+    <nav class="pagination" aria-label="Products paging" style="margin-top:1rem; display:flex; align-items:center; gap:0.5rem;">
+        <button class="btn" @onclick="PrevPage" disabled="@(pagedResponse == null || !pagedResponse.HasPreviousPage)">Previous</button>
+        <span>Page @currentPage of @totalPages (@totalCount items)</span>
+        <button class="btn" @onclick="NextPage" disabled="@(pagedResponse == null || !pagedResponse.HasNextPage)">Next</button>
+    </nav>
+}
+</div>
+
+@code {
+    private List<ProductDto> products = new();
+    private List<PriceDto> prices = new();
+    private Dictionary<int, PriceDto> latestPriceByProduct = new();
+    private Dictionary<int, List<PriceDto>> priceHistory = new();
+    private bool isLoading = true;
+    private bool loadError = false;
+    private bool priceHistoryLoading = false;
+    private bool priceHistoryError = false;
+    private string searchTerm = string.Empty;
+    private int? expandedProductId;
+
+    // paging
+    private int currentPage = 1;
+    private int pageSize = 20;
+    private int totalPages = 1;
+    private int totalCount = 0;
+    private PaginatedResponse<ProductDto>? pagedResponse;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync(1);
+    }
+
+    private async Task LoadAsync(int pageNumber)
+    {
+        isLoading = true;
+        loadError = false;
+        try
+        {
+            currentPage = Math.Max(1, pageNumber);
+
+            // request products with server-side paging and optional name filter
+            pagedResponse = await ApiClient.GetProductsAsync(pageNumber: currentPage, pageSize: pageSize, name: string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm);
+            products = pagedResponse?.Items ?? new List<ProductDto>();
+            totalPages = pagedResponse?.TotalPages ?? 1;
+            totalCount = pagedResponse?.TotalCount ?? 0;
+
+            // fetch a reasonably large set of prices to calculate latest per product (can be optimized)
+            var priceResp = await ApiClient.GetPricesAsync(pageNumber: 1, pageSize: 2000, sortBy: "DateTime", sortDirection: "desc");
+            prices = priceResp?.Items ?? new List<PriceDto>();
+            latestPriceByProduct = prices
+                .GroupBy(p => p.ProductId)
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.DateTime).First());
+        }
+        catch
+        {
+            loadError = true;
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task PrevPage()
+    {
+        if (pagedResponse == null || !pagedResponse.HasPreviousPage) return;
+        await LoadAsync(Math.Max(1, currentPage - 1));
+    }
+
+    private async Task NextPage()
+    {
+        if (pagedResponse == null || !pagedResponse.HasNextPage) return;
+        await LoadAsync(Math.Min(totalPages, currentPage + 1));
+    }
+
+    private IEnumerable<ProductDto> FilteredProducts()
+    {
+        // server-side paging + filter used; return current page items
+        return products;
+    }
+
+    private PriceDto? LatestPriceFor(int productId)
+    {
+        return latestPriceByProduct.TryGetValue(productId, out var v) ? v : null;
+    }
+
+    private async Task ToggleHistoryAsync(int productId)
+    {
+        if (expandedProductId == productId)
+        {
+            expandedProductId = null;
+            return;
+        }
+
+        expandedProductId = productId;
+
+        if (priceHistory.ContainsKey(productId)) return;
+
+        priceHistoryLoading = true;
+        priceHistoryError = false;
+
+        try
+        {
+            var resp = await ApiClient.GetPricesAsync(pageNumber: 1, pageSize: 100, productId: productId, sortBy: "DateTime", sortDirection: "desc");
+            var list = resp?.Items ?? new List<PriceDto>();
+            priceHistory[productId] = list;
+        }
+        catch
+        {
+            priceHistoryError = true;
+        }
+        finally
+        {
+            priceHistoryLoading = false;
+        }
+    }
+
+    private async Task RefreshAsync() => await LoadAsync(1);
+}

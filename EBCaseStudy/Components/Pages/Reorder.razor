@@ -1,0 +1,135 @@
+﻿@rendermode InteractiveServer
+@page "/reorder"
+@using EBCaseStudy.Models
+@inject EBCaseStudy.Services.IApiClient ApiClient
+@inject EBCaseStudy.Services.IOrderRepository OrdersRepo
+
+<h3>Reorder Items</h3>
+@if (isLoading)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <div class="reorder-container">
+        <ul class="reorder-order">
+                @foreach (var o in orders)
+                {
+                    <li>
+                        <ul class="reorder-list">
+                        @foreach (var item in o.Items)
+                        {
+                            <li class="reorder-item">
+                                <div class="item-content">
+                                    <span class="item-title">@item.ProductName</span>
+                                    <span class="item-meta">Qty: @item.Quantity • Price: @item.UnitPrice.ToString("C")</span>
+                                </div>
+                            </li>
+                        }
+                        </ul>
+
+                        <div class="reorder-controls" style="margin-top:0.75rem">
+                            <button class="btn primary" @onclick="async () => await SaveOrderAsync(o.Id)" disabled="@(items.Count == 0)">Save Order (use current prices)</button>
+                            <button class="btn" @onclick="ResetOrder">Reset</button>
+                        </div>
+                    </li>
+                }
+        </ul>
+    </div>
+}
+
+@code {
+    private List<OrderItem> items = new();
+    private List<Order> orders = new();
+    private int? draggingIndex;
+    private bool isLoading = true;
+    private int currentOrderId = 0; // optional: load an order to reorder its items
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Load a sample order or the latest one; adapt as needed
+        try
+        {
+            orders = await OrdersRepo.GetOrdersAsync();
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task SaveOrderAsync(int orderId)
+    {
+        // Before saving, capture current/latest price for each product from the API
+        try
+        {
+            var order = orders.Find(o => o.Id == orderId) ?? new();
+            
+            var priceTasks = order.Items.Select(async item =>
+            {
+                try
+                {
+                    var resp = await ApiClient.GetPricesAsync(pageNumber: 1, pageSize: 1, productId: item.ProductId, sortBy: "DateTime", sortDirection: "desc");
+                    var latest = resp?.Items?.FirstOrDefault();
+                    if (latest != null)
+                    {
+                        item.UnitPrice = latest.Amount; // update to current price
+                    }
+                }
+                catch
+                {
+                    // if fetching current price fails, keep existing item.UnitPrice
+                }
+            }).ToArray();
+
+            await Task.WhenAll(priceTasks);
+
+            if (currentOrderId == 0)
+            {
+                var newOrder = new Order
+                {
+                    CustomerName = "ReorderUser",
+                    CreatedAt = DateTime.UtcNow,
+                    Items = items.Select(i => new OrderItem
+                    {
+                        ProductId = i.ProductId,
+                        ProductName = i.ProductName,
+                        Quantity = i.Quantity,
+                        UnitPrice = i.UnitPrice,
+                        UnitOfMeasure = i.UnitOfMeasure
+                    }).ToList(),
+                    TotalAmount = items.Sum(i => i.UnitPrice * i.Quantity)
+                };
+                var saved = await OrdersRepo.CreateOrderAsync(newOrder);
+                currentOrderId = saved.Id;
+            }
+            else
+            {
+                if (order != null)
+                {
+                    order.Items = items.Select(i => new OrderItem
+                    {
+                        ProductId = i.ProductId,
+                        ProductName = i.ProductName,
+                        Quantity = i.Quantity,
+                        UnitPrice = i.UnitPrice,
+                        UnitOfMeasure = i.UnitOfMeasure
+                    }).ToList();
+                    order.TotalAmount = order.Items.Sum(it => it.UnitPrice * it.Quantity);
+
+                    await OrdersRepo.CreateOrderAsync(order);
+                }
+            }
+        }
+        catch
+        {
+            // handle/save error as needed
+        }
+    }
+
+    private void ResetOrder()
+    {
+        // reload original order to reset ordering
+        _ = OnInitializedAsync();
+    }
+}

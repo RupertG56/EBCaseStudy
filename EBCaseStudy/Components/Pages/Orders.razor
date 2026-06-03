@@ -1,0 +1,315 @@
+﻿@rendermode InteractiveServer
+@page "/orders"
+@using EBCaseStudy.Models
+@using EBCaseStudy.Services.Models
+@inject EBCaseStudy.Services.IApiClient ApiClient
+@inject EBCaseStudy.Services.IOrderRepository OrdersRepo
+
+<h3>Create Orders</h3>
+
+<div class="order-grid">
+    <section class="product-list">
+        <div class="list-header">
+            <input placeholder="Search products..." @bind="search" @bind:event="oninput" />
+            <button type="button" class="btn" @onclick="LoadProductsAsync">Refresh</button>
+        </div>
+
+        @if (loadingProducts)
+        {
+            <p>Loading products…</p>
+        }
+        else if (productLoadError)
+        {
+            <p class="text-danger">Failed to load products.</p>
+        }
+        else
+        {
+            <ul>
+                @foreach (var p in FilteredProducts())
+                {
+                    <li>
+                        <div class="product-row">
+                            <div class="product-info">
+                                <strong>@p.Name</strong>
+                                <div class="meta">@p.Category • @p.Sku</div>
+                                <div class="price">Latest: @GetLatestPriceDisplay(p.Id)</div>
+                            </div>
+                            <div>
+                                <button type="button" class="btn" @onclick="() => StartAddItem(p.Id, p.Name)">Add</button>
+                            </div>
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+
+    <section class="order-panel">
+        <h4>Create Order</h4>
+
+        <div class="form-row">
+            <label>Customer name</label>
+            <input @bind="customerName" />
+        </div>
+
+        <div class="cart-panel">
+            <h5>Order items</h5>
+
+            @if (cart.Count == 0)
+            {
+                <p>No items added.</p>
+            }
+            else
+            {
+                <table class="cart-table">
+                    <thead>
+                        <tr><th>Product</th><th>Qty</th><th>Unit Price</th></tr>
+                    </thead>
+                    <tbody>
+                        @for (int i = 0; i < cart.Count; i++)
+                        {
+                            var item = cart[i];
+                            <tr>
+                                <td>@item.ProductName</td>
+                                <td>
+                                    <input type="number" min="0.01" step="0.01" style="width: 15px" value="@item.Quantity"
+                                           @oninput="(e) => UpdateQuantity(i, e.Value?.ToString() ?? zeroString)" />
+                                </td>
+                                <td>@item.UnitPrice.ToString("C")</td>
+                            </tr>
+                            <tr>
+                                <td colspan="3">
+                                    <button type="button" class="btn" @onclick="() => RemoveFromCart(i)">Remove</button>
+                                    </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+
+                <div class="cart-totals">
+                    <div><strong>Total:</strong> @CartTotal.ToString("C")</div>
+                </div>
+            }
+
+            <div class="add-item-panel" style="margin-top:0.75rem">
+                @if (addingProductId != null)
+                {
+                    <div>
+                        <div><strong>Adding:</strong> @addingProductName</div>
+                        <div class="form-row">
+                            <label>Quantity</label>
+                            <input type="number" min="0.01" step="0.01" @bind="addingQuantity" />
+                        </div>
+                        <div class="form-row">
+                            <label>Unit price</label>
+                            <div>@(addingCapturedPrice.HasValue ? addingCapturedPrice.Value.ToString("C") : "—")</div>
+                        </div>
+                        <div class="actions">
+                            <button type="button" class="btn primary" @onclick="ConfirmAddToCart" disabled="@(addingCapturedPrice == null)">Add to cart</button>
+                            <button type="button" class="btn" @onclick="CancelAdd">Cancel</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="actions" style="margin-top:1rem">
+            <button type="button" class="btn primary" @onclick="CreateOrderAsync" disabled="@(cart.Count == 0 || string.IsNullOrWhiteSpace(customerName))">Place Order</button>
+            <button type="button" class="btn" @onclick="ClearCart">Clear</button>
+        </div>
+
+        @if (orderError)
+        {
+            <div class="text-danger">Failed to create order.</div>
+        }
+        @if (orderSuccess)
+        {
+            <div class="text-success">Order created (ID: @createdOrderId)</div>
+        }
+    </section>
+</div>
+
+@code {
+    // product + pricing
+    private List<EBCaseStudy.Services.Models.ProductDto> products = new();
+    private Dictionary<int, EBCaseStudy.Services.Models.PriceDto> latestByProduct = new();
+    private bool loadingProducts = true;
+    private bool productLoadError = false;
+    private string search = string.Empty;
+    private string zeroString = "0";
+
+    // order form
+    private string customerName = string.Empty;
+    private List<OrderItem> cart = new();
+
+    // add-item UI state
+    private int? addingProductId;
+    private string? addingProductName;
+    private double addingQuantity = 1;
+    private double? addingCapturedPrice;
+    private string addingUnitOfMeasure = string.Empty;
+
+    // result state
+    private bool orderError;
+    private bool orderSuccess;
+    private int createdOrderId;
+
+    protected override async Task OnInitializedAsync() => await LoadProductsAsync();
+
+    private async Task LoadProductsAsync()
+    {
+        loadingProducts = true;
+        productLoadError = false;
+        try
+        {
+            var prodResp = await ApiClient.GetProductsAsync(pageNumber: 1, pageSize: 10);
+            products = prodResp?.Items ?? new List<EBCaseStudy.Services.Models.ProductDto>();
+
+            var priceResp = await ApiClient.GetPricesAsync(pageNumber: 1, pageSize: 2000, sortBy: "DateTime", sortDirection: "desc");
+            var prices = priceResp?.Items ?? new List<EBCaseStudy.Services.Models.PriceDto>();
+            latestByProduct = prices
+                .GroupBy(p => p.ProductId)
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.DateTime).First());
+        }
+        catch
+        {
+            productLoadError = true;
+        }
+        finally
+        {
+            loadingProducts = false;
+            StateHasChanged();
+        }
+    }
+
+    private IEnumerable<EBCaseStudy.Services.Models.ProductDto> FilteredProducts()
+    {
+        if (string.IsNullOrWhiteSpace(search)) return products;
+        return products.Where(p => (p.Name ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
+                                 || (p.Sku ?? "").Contains(search, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private string GetLatestPriceDisplay(int productId)
+    {
+        return latestByProduct.TryGetValue(productId, out var p) ? p.Amount.ToString("C") : "—";
+    }
+
+    private async Task StartAddItem(int productId, string productName)
+    {
+        addingProductId = productId;
+        addingProductName = productName;
+        addingQuantity = 1;
+        addingCapturedPrice = null;
+        addingUnitOfMeasure = string.Empty;
+
+        try
+        {
+            // try to use cached latest price first
+            if (latestByProduct.TryGetValue(productId, out var lp))
+            {
+                addingCapturedPrice = lp.Amount;
+                addingUnitOfMeasure = lp.UnitOfMeasure ?? string.Empty;
+            }
+            else
+            {
+                var resp = await ApiClient.GetPricesAsync(pageNumber: 1, pageSize: 1, productId: productId, sortBy: "DateTime", sortDirection: "desc");
+                var latest = resp?.Items?.FirstOrDefault();
+                addingCapturedPrice = latest?.Amount;
+                addingUnitOfMeasure = latest?.UnitOfMeasure ?? string.Empty;
+            }
+        }
+        catch
+        {
+            addingCapturedPrice = null;
+        }
+    }
+
+    private void CancelAdd()
+    {
+        addingProductId = null;
+        addingProductName = null;
+        addingCapturedPrice = null;
+        addingQuantity = 1;
+    }
+
+    private void ConfirmAddToCart()
+    {
+        if (addingProductId == null || addingCapturedPrice == null || addingQuantity <= 0) return;
+
+        // if same product exists, increase qty and keep earliest captured price for that line
+        var existing = cart.FirstOrDefault(i => i.ProductId == addingProductId);
+        if (existing != null)
+        {
+            existing.Quantity += addingQuantity;
+        }
+        else
+        {
+            cart.Add(new OrderItem
+            {
+                ProductId = addingProductId.Value,
+                ProductName = addingProductName,
+                Quantity = addingQuantity,
+                UnitPrice = addingCapturedPrice.Value,
+                UnitOfMeasure = addingUnitOfMeasure
+            });
+        }
+
+        CancelAdd();
+    }
+
+    private void RemoveFromCart(int index)
+    {
+        if (index >= 0 && index < cart.Count) cart.RemoveAt(index);
+    }
+
+    private void UpdateQuantity(int index, string value)
+    {
+        if (!double.TryParse(value, out var q)) return;
+        if (index >= 0 && index < cart.Count)
+        {
+            cart[index].Quantity = Math.Max(0.01, q);
+        }
+    }
+
+    private double CartTotal => cart.Sum(i => i.UnitPrice * i.Quantity);
+
+    private async Task CreateOrderAsync()
+    {
+        orderError = orderSuccess = false;
+        if (cart.Count == 0 || string.IsNullOrWhiteSpace(customerName)) return;
+
+        var order = new Order
+        {
+            CustomerName = customerName,
+            CreatedAt = DateTime.UtcNow,
+            TotalAmount = CartTotal,
+            Items = cart.Select(i => new OrderItem
+            {
+                ProductId = i.ProductId,
+                ProductName = i.ProductName,
+                Quantity = i.Quantity,
+                UnitPrice = i.UnitPrice,
+                UnitOfMeasure = i.UnitOfMeasure
+            }).ToList()
+        };
+
+        try
+        {
+            var saved = await OrdersRepo.CreateOrderAsync(order);
+            createdOrderId = saved.Id;
+            orderSuccess = true;
+            ClearCart();
+            customerName = string.Empty;
+        }
+        catch
+        {
+            orderError = true;
+        }
+    }
+
+    private void ClearCart()
+    {
+        cart.Clear();
+        CancelAdd();
+    }
+}
