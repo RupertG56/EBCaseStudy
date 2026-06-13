@@ -1,6 +1,5 @@
-﻿using EBCaseStudy.Models;
-using System.Reflection.Emit;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
+using EBCaseStudy.Models;
 
 namespace EBCaseStudy.Data
 {

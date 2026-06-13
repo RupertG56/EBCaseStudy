@@ -34,11 +34,12 @@
                     </div>
                     <div class="meta">Latest: @((LatestPriceFor(p.Id) is PriceDto lp) ? lp.Amount.ToString("C") : "—")</div>
                 </div>
-                <div class="card-right">
-                    <button class="btn" @onclick="() => ToggleHistoryAsync(p.Id)">@((expandedProductId == p.Id) ? "Hide" : "History")</button>
-                </div>
-            </article>
 
+                <!--<div class="card-right">
+                    <button class="btn" @onclick="() => ToggleHistoryAsync(p.Id)">@((expandedProductId == p.Id) ? "Hide" : "History")</button>
+                </div>-->
+            </article>
+            @*
             @if (expandedProductId == p.Id)
             {
                 <div class="price-history">
@@ -64,15 +65,18 @@
                         <p>No history found.</p>
                     }
                 </div>
-            }
+            }*@
         }
     </div>
 
     <!-- Paging control -->
-    <nav class="pagination" aria-label="Products paging" style="margin-top:1rem; display:flex; align-items:center; gap:0.5rem;">
-        <button class="btn" @onclick="PrevPage" disabled="@(pagedResponse == null || !pagedResponse.HasPreviousPage)">Previous</button>
+    <nav class="pagination" aria-label="Products paging"
+         style="margin-top:1rem; display:flex; align-items:center; gap:0.5rem;">
+        <button class="btn" @onclick="PrevPage"
+                disabled="@(pagedResponse == null || !pagedResponse.HasPreviousPage)">Previous</button>
         <span>Page @currentPage of @totalPages (@totalCount items)</span>
-        <button class="btn" @onclick="NextPage" disabled="@(pagedResponse == null || !pagedResponse.HasNextPage)">Next</button>
+        <button class="btn" @onclick="NextPage"
+                disabled="@(pagedResponse == null || !pagedResponse.HasNextPage)">Next</button>
     </nav>
 }
 </div>
@@ -110,13 +114,15 @@
             currentPage = Math.Max(1, pageNumber);
 
             // request products with server-side paging and optional name filter
-            pagedResponse = await ApiClient.GetProductsAsync(pageNumber: currentPage, pageSize: pageSize, name: string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm);
+            pagedResponse = await ApiClient.GetProductsAsync(pageNumber: currentPage, pageSize: pageSize, name:
+string.IsNullOrWhiteSpace(searchTerm) ? null : searchTerm);
             products = pagedResponse?.Items ?? new List<ProductDto>();
             totalPages = pagedResponse?.TotalPages ?? 1;
             totalCount = pagedResponse?.TotalCount ?? 0;
 
             // fetch a reasonably large set of prices to calculate latest per product (can be optimized)
-            var priceResp = await ApiClient.GetPricesAsync(pageNumber: 1, pageSize: 2000, sortBy: "DateTime", sortDirection: "desc");
+            var priceResp = await ApiClient.GetPricesAsync(pageNumber: 1, pageSize: 2000, sortBy: "DateTime", sortDirection:
+"desc");
             prices = priceResp?.Items ?? new List<PriceDto>();
             latestPriceByProduct = prices
                 .GroupBy(p => p.ProductId)
@@ -156,7 +162,7 @@
         return latestPriceByProduct.TryGetValue(productId, out var v) ? v : null;
     }
 
-    private async Task ToggleHistoryAsync(int productId)
+    /*private async Task ToggleHistoryAsync(int productId)
     {
         if (expandedProductId == productId)
         {
@@ -173,7 +179,8 @@
 
         try
         {
-            var resp = await ApiClient.GetPricesAsync(pageNumber: 1, pageSize: 100, productId: productId, sortBy: "DateTime", sortDirection: "desc");
+            var resp = await ApiClient.GetPricesAsync(pageNumber: 1, pageSize: 100, productId: productId, sortBy: "DateTime",
+sortDirection: "desc");
             var list = resp?.Items ?? new List<PriceDto>();
             priceHistory[productId] = list;
         }
@@ -185,7 +192,7 @@
         {
             priceHistoryLoading = false;
         }
-    }
+    }*/
 
-    private async Task RefreshAsync() => await LoadAsync(1);
+    //private async Task RefreshAsync() => await LoadAsync(1);
 }

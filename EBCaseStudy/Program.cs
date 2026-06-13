@@ -26,11 +26,15 @@ builder.Services.AddRazorComponents()
 
 var app = builder.Build();
 
+// dotnet ef migrations add <Name>
+// dotnet ef database update
+/*
 using (var scope = app.Services.CreateScope())
 {
 	var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-	db.Database.EnsureCreated();
+	//db.Database.EnsureCreated();
 }
+*/
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
